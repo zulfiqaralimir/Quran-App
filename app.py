@@ -13,15 +13,17 @@ def clear_memory():
     torch.cuda.empty_cache()
 
 # Load the model and tokenizer once
+@st.cache_resource
 def load_models():
     embedder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-    model_path = "ibm-granite/granite-3b-code-instruct"
+    model_path = "distilbert-base-uncased"  # Use a smaller model
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForCausalLM.from_pretrained(model_path, device_map="cpu", torch_dtype=torch.float32)
+    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16)  # Load model with lower precision
     model.eval()
     return embedder, model, tokenizer
 
 # Load the dataset
+@st.cache_data
 def load_data(file_path, chunk_size=1000):
     return pd.read_csv(file_path, chunksize=chunk_size)
 
@@ -37,7 +39,7 @@ def process_chunks(df_iterator, embedder, index):
         index.add(vectors)
         clear_memory()
 
-# Main application
+# Streamlit app
 def main():
     st.title("Quranic Ayah Retrieval and Response Generation")
 
@@ -45,7 +47,7 @@ def main():
     embedder, model, tokenizer = load_models()
 
     # Path to your CSV file
-    csv_file_path = "/content/quran_dataset.csv"
+    csv_file_path = "quran_dataset.csv"
 
     # Load data
     df_iterator = load_data(csv_file_path)
@@ -54,7 +56,9 @@ def main():
     index = initialize_index()
 
     # Process data in chunks
-    process_chunks(df_iterator, embedder, index)
+    with st.spinner("Processing data..."):
+        process_chunks(df_iterator, embedder, index)
+        st.success("Data processed and indexed successfully!")
 
     # Input text from the user
     input_text = st.text_input("Enter your query about the Quranic Ayahs")
@@ -82,23 +86,11 @@ def main():
             retrieved_texts = "\n".join([ayah['ayah_en'] for ayah in retrieved_ayahs])
 
             input_tokens = tokenizer(retrieved_texts, return_tensors="pt", truncation=True, max_length=512)
-            for i in input_tokens:
-                input_tokens[i] = input_tokens[i].to("cpu")
+            input_tokens = {key: val.to("cpu") for key, val in input_tokens.items()}
 
             with torch.no_grad():
                 output = model.generate(
                     **input_tokens,
                     max_length=512,
                     pad_token_id=tokenizer.pad_token_id,
-                    num_beams=4,
-                    no_repeat_ngram_size=3,
-                )
-            generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-
-            st.write("**Generated Response:**")
-            st.write(generated_text)
-        else:
-            st.warning("Please enter a query.")
-
-if __name__ == "__main__":
-    main()
+             
