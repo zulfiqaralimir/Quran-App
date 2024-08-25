@@ -5,3 +5,9 @@ faiss-cpu
 transformers
 torch
 gdown
+
+
+
+
+
+
